@@ -3,24 +3,32 @@ library(hetGP)
 
 setOldClass("homGP")
 
-setClass("covHetGP", 
+# matching the covariance structure
+setClass("covHetGP2covkm", 
          slots = list(sd2 = "numeric", covtype = "character", theta = "numeric", nugget.flag = "logical"))
-setMethod("covMat1Mat2", "covHetGP", 
-          function(object, X1, X2, nugget.flag = FALSE){
+
+covHetGP2covkm <- function(model){
+  new(Class = "covHetGP2covkm", sd2 = model$nu_hat, covtype = model$covtype,
+      theta = model$theta, nugget.flag = FALSE)
+}
+
+setMethod("covMat1Mat2", "covHetGP2covkm", function(object, X1, X2, nugget.flag = FALSE){
             if(!nugget.flag) cov_gen(X1 = X1, X2 = X2, theta = object@theta, type = object@covtype)
           }
 )
 
-
 setClass("homGP2km", slots = list(model = "homGP", X = "matrix", y = "matrix", d = "integer", n = "integer",
-                                  noise.var = "numeric", noise.flag = "logical", covariance = "covHetGP"))
+                                  noise.var = "numeric", noise.flag = "logical", 
+                                  covariance = "covHetGP2covkm", trend.formula = "formula"))
 # newmod <- new(Class = "homGP2km", model = mhom1, X = mhom1$X0)
 
 homGP2km <- function(model){
   # if(class(model) == "homGP") class(model) <- "list" else stop("Model is not a homGP object")
   res <- new(Class = "homGP2km", model = model, X = model$X0, y = matrix(model$Z0, ncol = 1),
              d = ncol(model$X0), n = nrow(model$X0), noise.var = model$g, noise.flag = TRUE,
-             covariance = new(Class = "covHetGP", sd2 = model$nu_hat, covtype = model$covtype, theta = model$theta, nugget.flag = FALSE))
+             covariance = covHetGP2covkm(model), trend.formula = ~1, M = "matrix"
+             # covariance = new(Class = "covHetGP", sd2 = model$nu_hat, covtype = model$covtype, theta = model$theta, nugget.flag = FALSE)
+             )
   
   return(res)
 }
