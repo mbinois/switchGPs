@@ -45,7 +45,7 @@ setClass("homGP2km", slots = list(model = "homGP", X = "matrix", y = "matrix", d
 homGP2km <- function(model){
   # if(class(model) == "homGP") class(model) <- "list" else stop("Model is not a homGP object")
   C <- cov_gen(X1 = model$X0, theta = model$theta, type = model$covtype)
-  T <- chol(C + diag(model$g, nrow(model$X0)))/model$nu_hat
+  T <- chol(C + diag(model$g + model$eps, nrow(model$X0)))/model$nu_hat
   F <- matrix(1, nrow = nrow(model$X0), 1)
   M <- backsolve(t(T), F, upper.tri = FALSE)
   z <- as.numeric(backsolve(t(T), model$Z0 - F * model$beta0, upper.tri=FALSE))
@@ -79,7 +79,6 @@ setMethod("update", "homGP2km", function(object, newX, newy, newX.alreadyExist =
 })
 
 
-KK <- matrix()
 library(MASS)
 setMethod("simulate", "homGP2km", function(object, nsim=1, seed=NULL, newdata=NULL,
                                            cond=FALSE, nugget.sim=0, checkNames=TRUE, ...){
@@ -91,12 +90,67 @@ setMethod("simulate", "homGP2km", function(object, nsim=1, seed=NULL, newdata=NU
     mu <- preds$mean
     K <- preds$cov
   }
-  KK <<- K
-  print(K)
-  print(eigen(K)$values)
   y <- mvrnorm(n = nsim, mu = mu, Sigma = K)
   
 })
+
+## Now for hetGP
+setOldClass("hetGP")
+setClass("hetGP2km", slots = list(model = "hetGP", X = "matrix", y = "matrix", d = "integer", n = "integer",
+                                  noise.var = "numeric", noise.flag = "logical", 
+                                  covariance = "covHetGP2covkm", trend.formula = "formula", trend.coef = "numeric",
+                                  M = "matrix", T = "matrix", F = "matrix", z = "numeric"))
+
+hetGP2km <- function(model){
+  if(class(model) == "homGP") return(homGP2km(model))
+  C <- cov_gen(X1 = model$X0, theta = model$theta, type = model$covtype)
+  T <- chol(C + diag(model$Lambda + model$eps))/model$nu_hat
+  F <- matrix(1, nrow = nrow(model$X0), 1)
+  M <- backsolve(t(T), F, upper.tri = FALSE)
+  z <- as.numeric(backsolve(t(T), model$Z0 - F * model$beta0, upper.tri = FALSE))
+  
+  res <- new(Class = "hetGP2km", model = model, X = model$X0, y = matrix(model$Z0, ncol = 1),
+             d = ncol(model$X0), n = nrow(model$X0), noise.var = model$Lambda, noise.flag = TRUE,
+             covariance = covHetGP2covkm(model), trend.formula = ~1, trend.coef = model$beta0,
+             # covariance = new(Class = "covHetGP", sd2 = model$nu_hat, covtype = model$covtype, theta = model$theta, nugget.flag = FALSE)
+             F = F, M = M, T = T, z = z
+  )
+  
+  return(res)
+}
+
+setMethod("predict", "hetGP2km", function(object, newdata, type, se.compute = TRUE, 
+                                          cov.compute = FALSE, light.return = FALSE,
+                                          bias.correct = FALSE, checkNames = TRUE, ...){
+  xprime <- if(cov.compute) xprime <- newdata else xprime <- NULL
+  
+  if(class(newdata) == "data.frame") newdata <- as.matrix(newdata)
+  preds <- predict(object@model, x = newdata, xprime = xprime)
+  if(!is.null(xprime)) preds$cov <- 1/2*(preds$cov + t(preds$cov)) # to ensure symmetry
+  return(list(mean = preds$mean, sd = sqrt(preds$sd2), cov = preds$cov))
+})
+
+setMethod("update", "hetGP2km", function(object, newX, newy, newX.alreadyExist = FALSE,
+                                         cov.reestim = TRUE, trend.reestim = TRUE, nugget.reestim = FALSE, 
+                                         newnoise.var = NULL, kmcontrol = NULL, newF = NULL,...){
+  res <- update(object@model, Xnew = newX, Znew = newy)
+  return(hetGP2km(res))
+})
+
+setMethod("simulate", "hetGP2km", function(object, nsim=1, seed=NULL, newdata=NULL,
+                                           cond=FALSE, nugget.sim=0, checkNames=TRUE, ...){
+  if(cond==FALSE){
+    mu <- rep(object$beta0, nrow(newdata))
+    K <- cov_gen(newdata, theta = object@covariance@theta, type = object@model$covtype)
+  }else{
+    preds <- predict(object = object, newdata = newdata, cov.compute = TRUE)
+    mu <- preds$mean
+    K <- preds$cov
+  }
+  y <- mvrnorm(n = nsim, mu = mu, Sigma = K)
+  
+})
+
 
 ## Examples
 
@@ -144,8 +198,19 @@ omEGObis <- GParetoptim(model = list(homaskm1,homaskm2), fn = fname, crit = "EHI
                         lower = lower, upper = upper, critcontrol = critcontrol,
                         optimcontrol = optimcontrol, reinterpolation = FALSE)
 
+mhet1 <- mleHetGP(X = design.grid, Z = response.grid[,1])
+mhet2 <- mleHetGP(X = design.grid, Z = response.grid[,2])
+
+hetaskm1 <- hetGP2km(mhet1)
+hetaskm2 <- hetGP2km(mhet2)
+
+omEGOter <- GParetoptim(model = list(homaskm1,homaskm2), fn = fname, crit = "EHI", nsteps = nsteps,
+                        lower = lower, upper = upper, critcontrol = critcontrol,
+                        optimcontrol = optimcontrol, reinterpolation = FALSE)
+
 plotGPareto(omEGObis, control = list(PF.line.col = "green", col = "gray"))
 plotGPareto(omEGO1, add = TRUE)
+plotGPareto(omEGOter, add = TRUE, control = list(PF.line.col = "yellow", col = "orange"))
 
 ## With GPGame
 library(GPGame)
@@ -204,10 +269,17 @@ resbis <- solve_game(fun, model = list(homaskm1,homaskm2),
                   d = 2, nobj=2, x.to.obj = x.to.obj, integcontrol=integcontrol,
                   ncores = ncores, trace=1, seed=1)
 
-par(mfrow = c(1, 2))
+rester <- solve_game(fun, model = list(hetaskm1,hetaskm2),
+                     equilibrium = "NE", crit = "sur", n.init=n.init, n.ite=n.ite,
+                     d = 2, nobj=2, x.to.obj = x.to.obj, integcontrol=integcontrol,
+                     ncores = ncores, trace=1, seed=1)
+
+par(mfrow = c(1, 3))
 plotGameGrid(P1, n.grid = 21, graphs = "objective")
 plotGame(res, add = TRUE)
 plotGameGrid(P1, n.grid = 21, graphs = "objective")
-plotGame(resbis, add = TRUE, )
+plotGame(resbis, add = TRUE)
+plotGameGrid(P1, n.grid = 21, graphs = "objective")
+plotGame(rester, add = TRUE, )
 par(mfrow = c(1, 1))
 
