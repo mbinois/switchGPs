@@ -51,7 +51,7 @@ homGP2km <- function(model){
   z <- as.numeric(backsolve(t(T), model$Z0 - F * model$beta0, upper.tri=FALSE))
   
   res <- new(Class = "homGP2km", model = model, X = model$X0, y = matrix(model$Z0, ncol = 1),
-             d = ncol(model$X0), n = nrow(model$X0), noise.var = model$g, noise.flag = TRUE,
+             d = ncol(model$X0), n = nrow(model$X0), noise.var = model$g * model$nu_hat, noise.flag = TRUE,
              covariance = covHetGP2covkm(model), trend.formula = ~1, trend.coef = model$beta0,
              # covariance = new(Class = "covHetGP", sd2 = model$nu_hat, covtype = model$covtype, theta = model$theta, nugget.flag = FALSE)
              F = F, M = M, T = T, z = z
@@ -110,7 +110,7 @@ hetGP2km <- function(model){
   z <- as.numeric(backsolve(t(T), model$Z0 - F * model$beta0, upper.tri = FALSE))
   
   res <- new(Class = "hetGP2km", model = model, X = model$X0, y = matrix(model$Z0, ncol = 1),
-             d = ncol(model$X0), n = nrow(model$X0), noise.var = model$Lambda, noise.flag = TRUE,
+             d = ncol(model$X0), n = nrow(model$X0), noise.var = model$Lambda * model$nu_hat, noise.flag = TRUE,
              covariance = covHetGP2covkm(model), trend.formula = ~1, trend.coef = model$beta0,
              # covariance = new(Class = "covHetGP", sd2 = model$nu_hat, covtype = model$covtype, theta = model$theta, nugget.flag = FALSE)
              F = F, M = M, T = T, z = z
